@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use serde::Deserialize;
-use std::env;
+use tracing::{info, error, debug};
 
 #[derive(Debug, Deserialize)]
 struct Package {
@@ -91,7 +91,7 @@ fn ensure_gradle_wrapper() -> std::io::Result<PathBuf> {
     let jargo_dir = home_dir.join(".jargo/gradle-wrapper");
 
     if !jargo_dir.exists() {
-        println!("Gradle wrapper not found, extracting...");
+        info!("Gradle wrapper not found, extracting...");
 
         let zip_data = include_bytes!("../resources/gradle-wrapper.zip");
         let cursor = std::io::Cursor::new(zip_data);
@@ -112,24 +112,27 @@ fn ensure_gradle_wrapper() -> std::io::Result<PathBuf> {
             }
         }
 
-        println!("Gradle wrapper extracted to {}", jargo_dir.display());
+        info!("Gradle wrapper extracted to {}", jargo_dir.display());
     }
 
     Ok(jargo_dir)
 }
 
 fn main() {
+    // install global tracing subscriber configured based on RUST_LOG env var.
+    tracing_subscriber::fmt::init();
+
     let project_folder = "example_project";
     let jargo_path = format!("{}/Jargo.toml", project_folder);
     let toml_content = fs::read_to_string(&jargo_path).expect("Failed to read Jargo.toml");
 
     let config: JargoToml = toml::from_str(&toml_content).expect("Failed to parse Jargo.toml");
 
-    println!("Parsed configuration: {:#?}", config);
+    debug!("Parsed configuration: {:#?}", config);
 
     generate_gradle_files(Path::new(project_folder), &config).expect("Failed to generate Gradle files");
 
-    println!("Gradle files generated in '{}/'", project_folder);
+    info!("Gradle files generated in '{}/'", project_folder);
 
     let gradle_dir = ensure_gradle_wrapper().expect("Failed to set up Gradle wrapper");
 
@@ -139,7 +142,7 @@ fn main() {
         gradle_dir.join("gradlew")
     };
 
-    println!("Building project with Gradle...");
+    info!("Building project with Gradle...");
 
     let output = Command::new(gradlew)
         .args(&["clean", "build"])
@@ -148,12 +151,12 @@ fn main() {
         .expect("Failed to execute Gradle");
 
     if output.status.success() {
-        println!("Build successful.");
-        println!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
-        println!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+        info!("Build successful.");
+        info!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+        info!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
     } else {
-        println!("Build failed.");
-        println!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
-        println!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+        error!("Build failed.");
+        error!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+        error!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
     }
 }
