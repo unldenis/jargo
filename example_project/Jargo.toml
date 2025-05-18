@@ -1,0 +1,8 @@
+[package]
+name = "hello-jvm"
+version = "0.1.0"
+main = "com.example.Main"
+
+[dependencies] 
+gson = "com.google.code.gson:gson:2.10.1"
+test = { value = "org.junit.jupiter:junit-jupiter:5.10.0", scope = "Runtime" }
