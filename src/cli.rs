@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{builder::Str, Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -13,12 +13,11 @@ pub struct Cli {
 pub enum Commands {
     /// Create a new project skeleton with default Jargo.toml
     New {
-        #[arg(value_name = "DIR")]
-        directory: PathBuf,
+        name: String,
     },
     /// Build the project (generate Gradle files and run build)
     Build {
         #[arg(value_name = "DIR")]
-        directory: PathBuf,
+        directory_opt: Option<PathBuf>,
     },
 }

@@ -42,7 +42,7 @@ pub struct JargoToml {
 
 
 fn create_new_project(project_dir: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(project_dir)?;
+    // fs::create_dir_all(project_dir)?;
 
     // Crea un Jargo.toml base
     let jargo_toml = r#"
@@ -76,14 +76,21 @@ settings.gradle.kts
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
+    let binding = std::env::current_exe().unwrap();
+    let exe_path = binding.parent().unwrap();
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::New { directory } => {
-            create_new_project(directory)?;
+        Commands::New { name } => {
+            let directory = exe_path.join(name);
+            fs::create_dir(&directory)?;
+
+            create_new_project(&directory)?;
             info!("Project created at {}", directory.display());
         }
-        Commands::Build { directory } => {
+        Commands::Build { directory_opt } => {
+            let mut directory_mut = directory_opt.clone();
+            let directory = directory_mut.get_or_insert(exe_path.to_path_buf());
             let jargo_path = directory.join("Jargo.toml");
             let toml_content = std::fs::read_to_string(&jargo_path)?;
             let config: JargoToml = toml::from_str(&toml_content)?;
