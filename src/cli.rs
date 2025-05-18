@@ -4,18 +4,21 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "jargo")]
 #[command(about = "Build tool for Java projects", long_about = None)]
-struct Cli {
+pub struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    pub command: Commands,
 }
 
 #[derive(Subcommand)]
-enum Commands {
+pub enum Commands {
     /// Create a new project skeleton with default Jargo.toml
     New {
         #[arg(value_name = "DIR")]
         directory: PathBuf,
     },
     /// Build the project (generate Gradle files and run build)
-    Build ,
+    Build {
+        #[arg(value_name = "DIR")]
+        directory: PathBuf,
+    },
 }

@@ -3,8 +3,10 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use clap::Parser;
 use serde::Deserialize;
 use tracing::{info, error, debug};
+use cli::{Cli, Commands};
 
 pub mod gradle;
 pub mod cli;
@@ -39,76 +41,155 @@ pub struct JargoToml {
 }
 
 
+fn create_new_project(project_dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(project_dir)?;
+
+    // Crea un Jargo.toml base
+    let jargo_toml = r#"
+[package]
+name = "example_project"
+version = "0.1.0"
+main = "com.example.Main"
+
+[dependencies]
+"#;
+
+    fs::write(project_dir.join("Jargo.toml"), jargo_toml.trim_start())?;
 
 
-fn main() {
-    // install global tracing subscriber configured based on RUST_LOG env var.
+    let git_ignore = r#"
+build/
+.gradle/
+build.gradle.kts
+settings.gradle.kts    
+"#;
+
+    fs::write(project_dir.join(".gitignore"), git_ignore.trim_start())?;
+
+
+    // info!("Created Jargo.toml in {}", project_dir.display());
+
+    Ok(())
+}
+
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let project_folder = "example_project";
-    let jargo_path = format!("{}/Jargo.toml", project_folder);
-    let toml_content = fs::read_to_string(&jargo_path).expect("Failed to read Jargo.toml");
+    let cli = Cli::parse();
 
-    let config: JargoToml = toml::from_str(&toml_content).expect("Failed to parse Jargo.toml");
+    match &cli.command {
+        Commands::New { directory } => {
+            create_new_project(directory)?;
+            info!("Project created at {}", directory.display());
+        }
+        Commands::Build { directory } => {
+            let jargo_path = directory.join("Jargo.toml");
+            let toml_content = std::fs::read_to_string(&jargo_path)?;
+            let config: JargoToml = toml::from_str(&toml_content)?;
 
-    debug!("Parsed configuration: {:#?}", config);
+            gradle::generate_gradle_files(directory, &config)?;
+            info!("Gradle files generated.");
 
-    gradle::generate_gradle_files(Path::new(project_folder), &config).expect("Failed to generate Gradle files");
+            let gradle_dir = gradle::ensure_gradle_wrapper()?;
 
-    info!("Gradle files generated in '{}/'", project_folder);
+            let gradlew = if cfg!(windows) {
+                gradle_dir.join("gradlew.bat")
+            } else {
+                gradle_dir.join("gradlew")
+            };
 
-    let gradle_dir = gradle::ensure_gradle_wrapper().expect("Failed to set up Gradle wrapper");
+            if !gradlew.exists() {
+                error!("gradlew not found at {}", gradlew.display());
+                std::process::exit(1);
+            }
 
-    let gradlew = if cfg!(windows) {
-        gradle_dir.join("gradlew.bat")
-    } else {
-        gradle_dir.join("gradlew")
-    };
+            let output = Command::new(&gradlew)
+                .args(&["clean", "shadowJar"])
+                .current_dir(directory)
+                .output()?;
 
-    // Print gradlew path and check existence for debugging
-    if !gradlew.exists() {
-        error!("gradlew script not found at {}", gradlew.display());
-        std::process::exit(1);
+            if output.status.success() {
+                info!("Build successful.");
+            } else {
+                error!("Build failed.");
+            }
+        }
     }
 
-    let output = Command::new(&gradlew)
-        .args(&["clean", "shadowJar"])
-        .current_dir(project_folder)
-        .output()
-        .expect(&format!(
-            "Failed to execute Gradle at {} (exists: {})",
-            gradlew.display(),
-            gradlew.exists()
-        ));
-
-    if output.status.success() {
-        info!("Build successful.");
-        info!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
-        info!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
-    } else {
-        error!("Build failed.");
-        error!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
-        error!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
-    }
-
-
-    // Execute the jar
-    let jar_build_name = format!("{}-{}", config.package.name, config.package.version);
-    let output = Command::new("java")
-        .args(&["-jar", &format!("build/libs/{}.jar", jar_build_name)])
-        .current_dir(project_folder)
-        .output()
-        .expect("Failed to run the program");
-
-
-    if output.status.success() {
-        info!("Execution successful.");
-        info!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
-        info!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
-    } else {
-        error!("Execution failed.");
-        error!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
-        error!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
-    }
-
+    Ok(())
 }
+
+
+
+// fn main() {
+//     // install global tracing subscriber configured based on RUST_LOG env var.
+//     tracing_subscriber::fmt::init();
+
+//     let project_folder = "example_project";
+//     let jargo_path = format!("{}/Jargo.toml", project_folder);
+//     let toml_content = fs::read_to_string(&jargo_path).expect("Failed to read Jargo.toml");
+
+//     let config: JargoToml = toml::from_str(&toml_content).expect("Failed to parse Jargo.toml");
+
+//     debug!("Parsed configuration: {:#?}", config);
+
+//     gradle::generate_gradle_files(Path::new(project_folder), &config).expect("Failed to generate Gradle files");
+
+//     info!("Gradle files generated in '{}/'", project_folder);
+
+//     let gradle_dir = gradle::ensure_gradle_wrapper().expect("Failed to set up Gradle wrapper");
+
+//     let gradlew = if cfg!(windows) {
+//         gradle_dir.join("gradlew.bat")
+//     } else {
+//         gradle_dir.join("gradlew")
+//     };
+
+//     // Print gradlew path and check existence for debugging
+//     if !gradlew.exists() {
+//         error!("gradlew script not found at {}", gradlew.display());
+//         std::process::exit(1);
+//     }
+
+//     let output = Command::new(&gradlew)
+//         .args(&["clean", "shadowJar"])
+//         .current_dir(project_folder)
+//         .output()
+//         .expect(&format!(
+//             "Failed to execute Gradle at {} (exists: {})",
+//             gradlew.display(),
+//             gradlew.exists()
+//         ));
+
+//     if output.status.success() {
+//         info!("Build successful.");
+//         info!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+//         info!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+//     } else {
+//         error!("Build failed.");
+//         error!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+//         error!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+//     }
+
+
+//     // Execute the jar
+//     let jar_build_name = format!("{}-{}", config.package.name, config.package.version);
+//     let output = Command::new("java")
+//         .args(&["-jar", &format!("build/libs/{}.jar", jar_build_name)])
+//         .current_dir(project_folder)
+//         .output()
+//         .expect("Failed to run the program");
+
+
+//     if output.status.success() {
+//         info!("Execution successful.");
+//         info!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+//         info!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+//     } else {
+//         error!("Execution failed.");
+//         error!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+//         error!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+//     }
+
+// }
