@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use serde::Deserialize;
@@ -87,6 +88,8 @@ application {{
 }
 
 fn ensure_gradle_wrapper() -> std::io::Result<PathBuf> {
+    use std::io::{Read, Write};
+
     let home_dir = dirs::home_dir().expect("Could not determine home directory");
     let jargo_dir = home_dir.join(".jargo/gradle-wrapper");
 
@@ -103,20 +106,49 @@ fn ensure_gradle_wrapper() -> std::io::Result<PathBuf> {
 
             if file.name().ends_with('/') {
                 fs::create_dir_all(&outpath)?;
-            } else {
-                if let Some(parent) = outpath.parent() {
-                    fs::create_dir_all(parent)?;
+                continue;
+            }
+
+            if let Some(parent) = outpath.parent() {
+                fs::create_dir_all(parent)?;
+            }
+
+            let mut outfile = fs::File::create(&outpath)?;
+            let mut contents = Vec::new();
+            file.read_to_end(&mut contents)?;
+
+            // Convert CRLF to LF for text files (gradlew, *.sh, *.bat)
+            if cfg!(unix) {
+                let name = file.name();
+                let is_text_script = name == "gradlew" || name.ends_with(".sh") || name.ends_with(".bat");
+                if is_text_script {
+                    let text = String::from_utf8_lossy(&contents).replace("\r\n", "\n");
+                    outfile.write_all(text.as_bytes())?;
+                } else {
+                    outfile.write_all(&contents)?;
                 }
-                let mut outfile = fs::File::create(&outpath)?;
-                std::io::copy(&mut file, &mut outfile)?;
+            } else {
+                outfile.write_all(&contents)?;
             }
         }
 
         info!("Gradle wrapper extracted to {}", jargo_dir.display());
     }
 
+    let gradlew = jargo_dir.join("gradlew");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if gradlew.exists() {
+            let perms = fs::Permissions::from_mode(0o755);
+            fs::set_permissions(&gradlew, perms)?;
+        }
+    }
+
     Ok(jargo_dir)
 }
+
 
 fn main() {
     // install global tracing subscriber configured based on RUST_LOG env var.
@@ -142,13 +174,22 @@ fn main() {
         gradle_dir.join("gradlew")
     };
 
-    info!("Building project with Gradle...");
+    // Print gradlew path and check existence for debugging
+    info!("gradlew path: {}", gradlew.display());
+    if !gradlew.exists() {
+        error!("gradlew script not found at {}", gradlew.display());
+        std::process::exit(1);
+    }
 
-    let output = Command::new(gradlew)
+    let output = Command::new(&gradlew)
         .args(&["clean", "build"])
         .current_dir(project_folder)
         .output()
-        .expect("Failed to execute Gradle");
+        .expect(&format!(
+            "Failed to execute Gradle at {} (exists: {})",
+            gradlew.display(),
+            gradlew.exists()
+        ));
 
     if output.status.success() {
         info!("Build successful.");
