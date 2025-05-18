@@ -65,6 +65,7 @@ fn generate_gradle_files(project_dir: &Path, config: &JargoToml) -> std::io::Res
 plugins {{
     java
     application
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }}
 
 repositories {{
@@ -77,9 +78,24 @@ dependencies {{
 application {{
     mainClass.set("{main_class}")
 }}
+
+tasks {{
+    // Imposta il nome del JAR finale
+    named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {{
+        archiveBaseName.set("{name}")
+        archiveClassifier.set("")
+        archiveVersion.set("{version}")
+    }}
+
+    build {{
+        dependsOn(shadowJar)
+    }}
+}}
 "#,
         deps = deps,
-        main_class = config.package.main
+        main_class = config.package.main,
+        name = config.package.name,
+        version = config.package.version
     );
 
     fs::write(project_dir.join("build.gradle.kts"), build_gradle)?;
@@ -175,14 +191,13 @@ fn main() {
     };
 
     // Print gradlew path and check existence for debugging
-    info!("gradlew path: {}", gradlew.display());
     if !gradlew.exists() {
         error!("gradlew script not found at {}", gradlew.display());
         std::process::exit(1);
     }
 
     let output = Command::new(&gradlew)
-        .args(&["clean", "build"])
+        .args(&["clean", "shadowJar"])
         .current_dir(project_folder)
         .output()
         .expect(&format!(
@@ -200,4 +215,25 @@ fn main() {
         error!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
         error!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
     }
+
+
+    // Execute the jar
+    let jar_build_name = format!("{}-{}", config.package.name, config.package.version);
+    let output = Command::new("java")
+        .args(&["-jar", &format!("build/libs/{}.jar", jar_build_name)])
+        .current_dir(project_folder)
+        .output()
+        .expect("Failed to run the program");
+
+
+    if output.status.success() {
+        info!("Execution successful.");
+        info!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+        info!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+    } else {
+        error!("Execution failed.");
+        error!("stdout:\n{}", String::from_utf8_lossy(&output.stdout));
+        error!("stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+    }
+
 }
