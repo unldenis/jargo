@@ -2,3 +2,5 @@
 
 /example_project/build
 /example_project/.gradle
+/example_project/build.gradle.kts
+/example_project/settings.gradle.kts
